@@ -1,0 +1,4 @@
+# id sensor, tipo_de_sensor, comm_port, intervalo, th
+1,1,2345,1000,10
+2,1,77,1000,15
+5,5,569,1000,6

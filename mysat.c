@@ -51,12 +51,14 @@ int alarma = 0;
 
 Sensor *competitivo;
 Sensor *cooperativo;
+
 pthread_t tid1; /* the thread identifier */
 pthread_t tid2; /* the thread identifier */
 pthread_attr_t attr; /* set of attributes for the thread */
 
 int main(int argc, char *argv[])
 {
+    
     if (argc != 4){ 
         printf("Invalid arguments only eg.\"filename nameFile delaT nSensores!!\""); 
         return 0; 
@@ -73,11 +75,10 @@ int main(int argc, char *argv[])
     
     char *tmp=malloc(255 * sizeof(char));
     Sensor s;
+    
     for(int i=0;i<n;i++){
         strcpy(tmp,lineas[i]);
-        printf("\nlinea %s",lineas[i]);
         char *p = strtok (tmp, ",");
-        
         int y=0;
         while (p != NULL){
             switch (y){
@@ -96,7 +97,7 @@ int main(int argc, char *argv[])
                     break;
                 case 4:
                     s.th=atoi(p);
-                    
+            
                     int shmid;
                     if ((shmid = shmget(s.comm, SHMSZ,  0666)) < 0) {
                         perror("shmget");
@@ -106,9 +107,10 @@ int main(int argc, char *argv[])
                         perror("shmat");
                         exit(1);
                     }
+                    printf("id %ld aa\n",s.valorAct);
                     int buffer = (int)(deltaT / s.intervalo) - 1;
                     s.buffer = buffer;
-                    s.valores = malloc(buffer * sizeof(int));
+                     
                     if(s.tipo < 5){
                         competitivo[cntComp++]=s;
                     }  
@@ -130,17 +132,38 @@ int main(int argc, char *argv[])
     /* get the default attributes */
     pthread_attr_init(&attr);
     //pthread_create(&tid1,&attr,varianza,NULL);
-    pthread_create(&tid2,&attr,suma_ponderada,NULL);
+    //pthread_create(&tid2,&attr,suma_ponderada,&cooperativo);
+    /*
+    char name[5];
+    int **buffers = malloc(cntCoop * sizeof(int *));
+    key_t key;
+    for(int x=0;x<cntCoop;x++){
+        sprintf(name, "%d", cooperativo[x].id);
+        strcat(name,"key");
+        key = ftok(name,65); 
 
-    /*for(int x=0;x<cntComp;x++){
-        Sensor s=competitivo[x];
-        printf("-->COMPE Sensor id: %d , tipo: %d, intervalo: %f %d\n",s.id,s.tipo,s.intervalo, s.comm);
+        int shmid = shmget(s.id+s.comm,sizeof(int)*cooperativo[x].buffer,0666|IPC_CREAT); 
+
+        buffers[x] = (int*) shmat(shmid,NULL,0);
+        
     }
+    
+    int *valoresBuffer;
+    while(1){
+        usleep(deltaT);
+        for(int x=0;x<cntCoop;x++){
+            valoresBuffer=buffers[x];
+            if(cooperativo[x].activo){
+                for(int i=0;i<=cooperativo[x].buffer;i++){
+                    printf("\n VALOR i %d = %d  y th %d\n",i,valoresBuffer[i], cooperativo[x].id);
+                }      
+            }
+        }
+    }*/
     for(int x=0;x<cntCoop;x++){
         Sensor s=cooperativo[x];
         printf("-->COOPE Sensor id: %d , tipo: %d, intervalo: %f %d\n",s.id,s.tipo,s.intervalo, s.comm);
-    }*/
-
+    }
     signal(SIGINT, sig_handlerINT);
     while(1){
         usleep(deltaT);
@@ -198,15 +221,31 @@ void sig_handlerINT(int signo){
 void *sensor(void *param){
     Sensor s = *((Sensor *)param);
     int x = 0;
+    char name[15];
+    sprintf(name, "%d",s.id);
+    strcat(name,"key");
+    key_t key = ftok(".",s.comm);
+      if ( 0 > key )
+    {
+       perror("ftok"); /*Displays the error message*/
+       /*Error handling. Return with some error code*/
+    }
+
+    printf("key %d\n", key);
+    // shmget returns an identifier in shmid 
+    int shmid = shmget(s.id+s.comm, sizeof(int)*s.buffer ,0666|IPC_CREAT); 
+    
+    // shmat to attach to shared memory 
+    int *valores = (int*) shmat(shmid,NULL,0);
+    printf("id %ld\n",valores);
     while(1){
         /* ms to mr  se debe de multiplicar por 1000*/
         usleep(s.intervalo);
-        s.valores[x++] = *s.valorAct;
-        //printf("DATO ACTUAL del sensor %d es %d, activo: %d\n",s.id,*s.valorAct,s.activo);
+        valores[x++] = *s.valorAct;
+        //printf("DATO ACTUAL del sensor %d  %d  es %d, activo: %d\n",s.id,s.comm,*s.valorAct,s.activo);
         if(*s.valorAct==-1)
             s.activo=0;
-        else
-        {
+        else{
             s.activo=1;
         }
         if(s.buffer+1==x){
@@ -263,19 +302,37 @@ void *varianza(void *param){
 }
 
 void *suma_ponderada(void *param){
+    Sensor *cooperativo = ((Sensor *)param);
+    char name[5];
+    int *buffers = malloc(cntCoop * sizeof(int *));
+    for(int x=0;x<cntCoop;x++){
+        // ftok to generate unique key 
+        sprintf(name, "%d", cooperativo[x].id);
+        strcat(name,"key");
+        key_t key = ftok(name,65); 
+
+        // shmget returns an identifier in shmid 
+        int shmid = shmget(key,cooperativo[x].buffer,0666|IPC_CREAT); 
+
+        // shmat to attach to shared memory 
+        int *valores = (int*) shmat(shmid,NULL,0);
+        buffers[x]=*valores;
+    }
     
+
     while(1){
         usleep(deltaT);
         int sumatoria=0;
         int nActivos=0;
+        int *valoresBuffer;
         for(int x=0;x<cntCoop;x++){
-            Sensor s=cooperativo[x];
-            if(s.activo){
+            valoresBuffer=&buffers[x];
+            if(cooperativo[x].activo){
                 nActivos++;
-                for(int i=0;i<=s.buffer;i++){
-                    printf("\n VALOR i %d = %d  y th %d\n",i,s.valores[i], s.th);
-                    if(s.valores[i]>s.th){
-                        sumatoria=sumatoria+s.valores[i];
+                for(int i=0;i<=cooperativo[x].buffer;i++){
+                    printf("\n VALOR i %d = %d  y th %d\n",i,valoresBuffer[i], cooperativo[x].id);
+                    if(valoresBuffer[i]>cooperativo[x].th){
+                        sumatoria=sumatoria+valoresBuffer[i];
                     }
                 }      
             }

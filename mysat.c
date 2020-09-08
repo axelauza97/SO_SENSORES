@@ -132,17 +132,18 @@ int main(int argc, char *argv[])
     /* get the default attributes */
     pthread_attr_init(&attr);
     //pthread_create(&tid1,&attr,varianza,NULL);
-    //pthread_create(&tid2,&attr,suma_ponderada,&cooperativo);
+    pthread_create(&tid2,&attr,suma_ponderada,cooperativo);
     /*
     char name[5];
-    int **buffers = malloc(cntCoop * sizeof(int *));
+    int **buffers = malloc(cntCoop * sizeof(int *) -1);
     key_t key;
+    int shmid;
     for(int x=0;x<cntCoop;x++){
         sprintf(name, "%d", cooperativo[x].id);
         strcat(name,"key");
         key = ftok(name,65); 
 
-        int shmid = shmget(s.id+s.comm,sizeof(int)*cooperativo[x].buffer,0666|IPC_CREAT); 
+        shmid = shmget(s.id+s.comm,sizeof(int)*cooperativo[x].buffer,0666|IPC_CREAT); 
 
         buffers[x] = (int*) shmat(shmid,NULL,0);
         
@@ -221,17 +222,6 @@ void sig_handlerINT(int signo){
 void *sensor(void *param){
     Sensor s = *((Sensor *)param);
     int x = 0;
-    char name[15];
-    sprintf(name, "%d",s.id);
-    strcat(name,"key");
-    key_t key = ftok(".",s.comm);
-      if ( 0 > key )
-    {
-       perror("ftok"); /*Displays the error message*/
-       /*Error handling. Return with some error code*/
-    }
-
-    printf("key %d\n", key);
     // shmget returns an identifier in shmid 
     int shmid = shmget(s.id+s.comm, sizeof(int)*s.buffer ,0666|IPC_CREAT); 
     
@@ -303,30 +293,25 @@ void *varianza(void *param){
 
 void *suma_ponderada(void *param){
     Sensor *cooperativo = ((Sensor *)param);
-    char name[5];
-    int *buffers = malloc(cntCoop * sizeof(int *));
-    for(int x=0;x<cntCoop;x++){
-        // ftok to generate unique key 
-        sprintf(name, "%d", cooperativo[x].id);
-        strcat(name,"key");
-        key_t key = ftok(name,65); 
-
-        // shmget returns an identifier in shmid 
-        int shmid = shmget(key,cooperativo[x].buffer,0666|IPC_CREAT); 
-
-        // shmat to attach to shared memory 
-        int *valores = (int*) shmat(shmid,NULL,0);
-        buffers[x]=*valores;
-    }
     
+    int **buffers = malloc(cntCoop * sizeof(int *) -1);
+    int shmid;
+    for(int x=0;x<cntCoop;x++){
+        shmid = shmget(cooperativo[x].id+cooperativo[x].comm,sizeof(int)*cooperativo[x].buffer,0666|IPC_CREAT); 
 
+        buffers[x] = (int*) shmat(shmid,NULL,0);
+        
+    }
+
+    int sumatoria=0;
+    int nActivos=0;
+    int *valoresBuffer;
     while(1){
         usleep(deltaT);
-        int sumatoria=0;
-        int nActivos=0;
-        int *valoresBuffer;
+        sumatoria=0;
+        nActivos=0;
         for(int x=0;x<cntCoop;x++){
-            valoresBuffer=&buffers[x];
+            valoresBuffer=buffers[x];
             if(cooperativo[x].activo){
                 nActivos++;
                 for(int i=0;i<=cooperativo[x].buffer;i++){

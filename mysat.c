@@ -9,30 +9,29 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <math.h>
 #include "csapp.h"
 
 #define SHMSZ     4
 
 typedef struct {
-    int id,tipo,comm,th,activo,buffer,*valorAct,*valores;
+    int id,tipo,comm,th,activo,buffer,*valorAct;
     float intervalo;
     pid_t pid;
     pthread_t tid;
 } Sensor;
 
-typedef Sensor Element;
+typedef struct nodo_sensor {
+	Sensor s;
+	struct nodo_sensor* siguiente;
+} node;
 
 typedef struct {
-    Element *content;
-    int current_size;
-    int top;
-} Stack;
+    node *cabecera;
+} Lista;
 
-void initialize(Stack *stack);
-void destroy(Stack *stack);
-int is_empty(Stack *stack);
-void push(Stack *stack, Element data);
-Element pop(Stack *stack);
+void addNode(Lista *l,Sensor *s);
+void recorrer_lista(node *cabecera);
 
 void readFile(char **lineas,char *name);
 void *sensor(void *param); /* the thread */
@@ -107,7 +106,6 @@ int main(int argc, char *argv[])
                         perror("shmat");
                         exit(1);
                     }
-                    printf("id %ld aa\n",s.valorAct);
                     int buffer = (int)(deltaT / s.intervalo) - 1;
                     s.buffer = buffer;
                      
@@ -131,8 +129,8 @@ int main(int argc, char *argv[])
     printf("Creacion de hilos suma ponderada, varianza y decision\n");
     /* get the default attributes */
     pthread_attr_init(&attr);
-    //pthread_create(&tid1,&attr,varianza,NULL);
-    pthread_create(&tid2,&attr,suma_ponderada,cooperativo);
+    pthread_create(&tid1,&attr,varianza,competitivo);
+    //pthread_create(&tid2,&attr,suma_ponderada,cooperativo);
     /*
     char name[5];
     int **buffers = malloc(cntCoop * sizeof(int *) -1);
@@ -161,10 +159,6 @@ int main(int argc, char *argv[])
             }
         }
     }*/
-    for(int x=0;x<cntCoop;x++){
-        Sensor s=cooperativo[x];
-        printf("-->COOPE Sensor id: %d , tipo: %d, intervalo: %f %d\n",s.id,s.tipo,s.intervalo, s.comm);
-    }
     signal(SIGINT, sig_handlerINT);
     while(1){
         usleep(deltaT);
@@ -227,7 +221,6 @@ void *sensor(void *param){
     
     // shmat to attach to shared memory 
     int *valores = (int*) shmat(shmid,NULL,0);
-    printf("id %ld\n",valores);
     while(1){
         /* ms to mr  se debe de multiplicar por 1000*/
         usleep(s.intervalo);
@@ -245,32 +238,83 @@ void *sensor(void *param){
 }
 
 void *varianza(void *param){
-    Stack *tipo1,*tipo2,*tipo3,*tipo4;
-    initialize(tipo1);
-    initialize(tipo2);
-    initialize(tipo3);
-    initialize(tipo4);
+    Sensor *competitivo = ((Sensor *)param);
+    Lista tipo1,tipo2,tipo3,tipo4;
+    tipo1.cabecera=NULL;    
+    tipo2.cabecera=NULL;
+    tipo3.cabecera=NULL;
+    tipo4.cabecera=NULL;
     
+    Sensor s;
+
     for(int x=0;x<cntComp;x++){
-        Sensor s=competitivo[x];
-        printf("Sendor 5 %d",s.comm);
+        s=competitivo[x];
         switch (s.tipo){
-                case 1:
-                    push(tipo1,s);
-                    break;
-                case 2:
-                    push(tipo2,s);
-                    break;
-                case 3:
-                    push(tipo3,s);
-                    break;
-                case 4:
-                    push(tipo4,s);
-                    break;
+            case 1:
+                addNode(&tipo1,&s);
+                printf("entra");
+                break;
+            case 2:
+                addNode(&tipo2,&s);
+                break;
+            case 3:
+                addNode(&tipo3,&s);
+                break;
+            case 4:
+                addNode(&tipo4,&s);
+                break;
         }
     }
+    node *ptr;
+    int xmedia=0;
+    float varianza=0;
+    int shmid, *buffer;
+    while(1){
+        usleep(deltaT);
+        
+        ptr = tipo1.cabecera;
+        
+        while(ptr != NULL) {
+            shmid = shmget(ptr->s.id+ptr->s.comm,sizeof(int)*ptr->s.buffer,0666|IPC_CREAT); 
+            buffer = (int*) shmat(shmid,NULL,0);
+            for(int i=0;i<=ptr->s.buffer;i++){
+                printf("Valor %d",buffer[i]);
+                xmedia=xmedia+buffer[i];
+            } 
+            for(int i=0;i<=ptr->s.buffer;i++){
+                varianza=(buffer[i]-xmedia)*(buffer[i]-xmedia);
+            } 
+            varianza=varianza/(ptr->s.buffer-1);
+            printf("Varianza %f\n",varianza);
+            varianza=0;
+            xmedia=0;
+            ptr = ptr->siguiente;
+        }
+        
+    }   
+
     
+	ptr = tipo2.cabecera;
+
+	while(ptr != NULL) {
+		printf("%d\n",ptr->s.id);
+		ptr = ptr->siguiente;
+	}
     
+	ptr = tipo3.cabecera;
+
+	while(ptr != NULL) {
+		printf("%d\n",ptr->s.id);
+		ptr = ptr->siguiente;
+	}
+    
+	ptr = tipo4.cabecera;
+
+	while(ptr != NULL) {
+		printf("%d\n",ptr->s.id);
+		ptr = ptr->siguiente;
+	}
+
     /*while(1){
         usleep(deltaT);
         for(int x=0;x<cntComp;x++){
@@ -327,56 +371,23 @@ void *suma_ponderada(void *param){
     }
     pthread_exit(0);
 }
-
-
-void initialize(Stack *stack)
+void recorrer_lista(node *cabecera)
 {
-    Element *content;
+	node *ptr;
+	ptr = cabecera;
 
-    content = (Element *) calloc(2, sizeof(Element));
+	while(ptr != NULL) {
+		printf("%d\n",ptr->s.id);
+		ptr = ptr->siguiente;
+	}
+}
+void addNode(Lista *l,Sensor *s){
+    node *enlace= (node *) malloc(sizeof(node));
+    enlace->s= *s;
+    enlace->siguiente = l->cabecera;
+    l->cabecera = enlace;
+}
 
-    if (content == NULL) 
-    {
-        fprintf(stderr, "Not enough memory to initialize stack\n");
-        exit(1);
-    }
-
-    stack->content = content;
-    stack->current_size = 2;
-    stack->top = -1;
-}
-void destroy(Stack *stack)
-{
-    free(stack->content);
-
-    stack->content = NULL;
-    stack->current_size = 0;
-    stack->top = -1;
-}
-int is_empty(Stack *stack)
-{
-    if (stack->top < 0)
-        return 1;
-    else
-        return 0;
-}
-void push(Stack *stack, Element data)
-{    
-    stack->top = stack->top + 1;
-    stack->content[stack->top] = data;
-}
-Element pop(Stack *stack)
-{
-    if (is_empty(stack) == 0)
-    {
-        Element data = stack->content[stack->top];
-        stack->top = stack->top - 1;
-        return data;
-    }
-    
-    fprintf(stderr, "Stack is empty\n");
-    exit(1);
-}
 
 /*
     int listenfd, connfd,n;

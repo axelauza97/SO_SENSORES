@@ -50,7 +50,7 @@ int main(){
 		case(REC_RESP):
             while( (n=Rio_readn(clientfd,buf,MAXLINE)) >0)
             {   if(buf[0]!='o')     
-                printf("\n--> %s",buf);
+                printf("--> %s\n",buf);
                 Rio_writen(clientfd, "ok", 2*sizeof(char));
             }
             estado=DESCONECTADO;
@@ -71,23 +71,23 @@ void entrada(int *opcion){
         printf("Opciones:\n\t1.- Datos que llegan en cada sensor\n");
         printf("\t2.- Reglas que se cumplen y estado de alarma\n");
         printf("\t3.- Ver informacion de diagnostico de sensores (activo/inactivo, pid, fecha de ultimo dato recibido)\n");
-        printf("\t4.- Salir\n");
+        printf("\t4.- Salir\n:\t");
         scanf("%d",opcion);
         switch (*opcion){
         case 1:
-            printf("Datos que llegan en cada sensor\n");
+            printf("\nDatos que llegan en cada sensor\n");
             flag=0;
             break;
         case 2:
-            printf("Reglas que se cumplen y estado de alarma\n");
+            printf("\nReglas que se cumplen y estado de alarma\n");
             flag=0;
             break;
         case 3:
-            printf("Ver informacion de diagnostico de sensores (activo/inactivo, pid, fecha de ultimo dato recibido)\n");
+            printf("\nVer informacion de diagnostico de sensores (activo/inactivo, pid, fecha de ultimo dato recibido)\n");
             flag=0;
             break;      
         case 4:
-            printf("Salir");
+            printf("\nSalir");
             flag=0;
             break;
         }

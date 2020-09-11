@@ -17,7 +17,6 @@
 typedef struct {
     int id,tipo,comm,th,activo,buffer,*valorAct;
     float intervalo;
-    pid_t pid;
     pthread_t tid;
     char timeinfo[30];
 } Sensor;
@@ -54,8 +53,8 @@ float VarianzaComp=0;
 int alarma = 0;
 int Th=0;
 
-Sensor *competitivo;
-Sensor *cooperativo;
+
+Lista lcompetitivo,lcooperativo;
 
 pthread_t tid1; /* the thread identifier */
 pthread_t tid2; /* the thread identifier */
@@ -72,8 +71,6 @@ int main(int argc, char *argv[])
     int n=atoi(argv[3]);
     Th = atoi(argv[4]);
     deltaT=atoi(argv[2]);
-    competitivo = malloc(n * sizeof(Sensor));
-    cooperativo = malloc(n * sizeof(Sensor));
 
     char **lineas;
     lineas = malloc(n * sizeof(char*));    
@@ -116,17 +113,17 @@ int main(int argc, char *argv[])
                     }
                     int buffer = (int)(deltaT / s.intervalo) - 1;
                     s.buffer = buffer;
-                     
+                    
                     if(s.tipo < 5){
-                        competitivo[cntComp++]=s;
-                        pthread_create(&s.tid,&attr,sensor,(void *) &competitivo[cntComp-1]);
+                        cntComp++;
+                        addNode(&lcompetitivo,&s);
+                        
                     }  
                     else{
-                        cooperativo[cntCoop++]=s;
-                        pthread_create(&s.tid,&attr,sensor,(void *) &cooperativo[cntCoop-1]);
+                        cntCoop++;
+                        addNode(&lcooperativo,&s);
                     }
-                    //pthread_attr_init(&attr);
-                    //pthread_create(&s.tid,&attr,sensor,(void *) &s);
+                    pthread_create(&s.tid,&attr,sensor,(void *) &s);
                     sleep(1);//Tiempo para llenar buffer necesario de Varianza
                     break;
             }
@@ -137,8 +134,8 @@ int main(int argc, char *argv[])
     }
     printf("Creacion de hilos suma ponderada, varianza y decision\n");
     /* get the default attributes */
-    pthread_create(&tid1,&attr,varianza,competitivo);
-    pthread_create(&tid2,&attr,suma_ponderada,cooperativo);
+    pthread_create(&tid1,&attr,varianza,&lcompetitivo);
+    pthread_create(&tid2,&attr,suma_ponderada,&lcooperativo);
     pthread_create(&tid3,&attr,decision,NULL);
     signal(SIGINT, sig_handlerINT);
         
@@ -150,6 +147,7 @@ int main(int argc, char *argv[])
 	char *haddrp, *port;
     char opcion[2];
 	rio_t rio;
+    node *ptr;
 
 	port = "8080";
 	estado=DESCONECTADO;
@@ -188,17 +186,21 @@ int main(int argc, char *argv[])
 			//ESCRIBIR
             if(strcmp(opcion,"1")==0){
                 //Datos que llegan en cada sensor
-                for(int x=0;x<cntComp;x++){
-                    s=competitivo[x];
+                ptr = lcompetitivo.cabecera;
+                while(ptr != NULL) {
+                    s=ptr->s;
                     snprintf(buf, sizeof(buf), "Sensor competitivo id %d y valor %d", s.id,*s.valorAct);
                     Rio_writen(connfd,buf,MAXLINE);
                     Rio_readn(connfd,buf,2);
+                    ptr = ptr->siguiente;
                 }
-                for(int x=0;x<cntCoop;x++){
-                    s=cooperativo[x];
+                ptr = lcooperativo.cabecera;
+                while(ptr != NULL) {
+                    s=ptr->s;
                     snprintf(buf, sizeof(buf), "Sensor cooperativo id %d y valor %d", s.id,*s.valorAct);
                     Rio_writen(connfd,buf,MAXLINE);
                     Rio_readn(connfd,buf,2);
+                    ptr = ptr->siguiente;
                 }
                 Rio_writen(connfd, "ok", 2*sizeof(char));
             }
@@ -231,8 +233,9 @@ int main(int argc, char *argv[])
             }
             if(strcmp(opcion,"3")==0){
                 //Ver informacion de diagnostico de sensores (activo/inactivo, pid, fecha de ultimo dato recibido)
-                for(int x=0;x<cntComp;x++){
-                    s=competitivo[x];
+                ptr = lcompetitivo.cabecera;
+                while(ptr != NULL) {
+                    s=ptr->s;
                     if(*s.valorAct==-1)
                         snprintf(buf, sizeof(buf), "Sensor competitivo id %d, activo False, tid %ld, fecha %s ", s.id,s.tid,s.timeinfo);
                     else
@@ -242,9 +245,11 @@ int main(int argc, char *argv[])
                         
                     Rio_writen(connfd,buf,MAXLINE);
                     Rio_readn(connfd,buf,2);
+                    ptr = ptr->siguiente;
                 }
-                for(int x=0;x<cntCoop;x++){
-                    s=cooperativo[x];
+                ptr = lcooperativo.cabecera;
+                while(ptr != NULL) {
+                    s=ptr->s;
                     if(*s.valorAct==-1)
                         snprintf(buf, sizeof(buf), "Sensor Cooperativo id %d, activo False, tid %ld, fecha %s", s.id,s.tid,s.timeinfo);
                     else
@@ -253,6 +258,7 @@ int main(int argc, char *argv[])
                     }
                     Rio_writen(connfd,buf,MAXLINE);
                     Rio_readn(connfd,buf,2);
+                    ptr = ptr->siguiente;
                 }
                 Rio_writen(connfd, "ok", 2*sizeof(char));
             }
@@ -295,18 +301,26 @@ void sig_handlerINT(int signo){
     printf("Terminando lectura de sensores competitivos\n");
     
     int shmid;
-    for(int i=0;i<cntComp;i++){                
-        shmdt(competitivo[i].valorAct);
-        shmid = shmget(competitivo[i].id+competitivo[i].comm,sizeof(int)*competitivo[i].buffer,0666);
+    Sensor s;
+    node *ptr;
+    ptr = lcompetitivo.cabecera;
+    while(ptr != NULL) {
+        s=ptr->s;                
+        shmdt(s.valorAct);
+        shmid = shmget(s.id+s.comm,sizeof(int)*s.buffer,0666);
         shmdt(shmat(shmid,NULL,0)); 
-        pthread_cancel(competitivo[i].tid);
+        pthread_cancel(s.tid);
+        ptr = ptr->siguiente;
     }
     printf("Terminando sensores cooperativos\n");
-    for(int i=0;i<cntCoop;i++){    
-        shmdt(cooperativo[i].valorAct);
-        shmid = shmget(cooperativo[i].id+cooperativo[i].comm,sizeof(int)*cooperativo[i].buffer,0666);
+    ptr = lcooperativo.cabecera;
+    while(ptr != NULL) {  
+        s=ptr->s;       
+        shmdt(s.valorAct);
+        shmid = shmget(s.id+s.comm,sizeof(int)*s.buffer,0666);
         shmdt(shmat(shmid,NULL,0));
-        pthread_cancel(cooperativo[i].tid);
+        pthread_cancel(s.tid);
+        ptr = ptr->siguiente;
     }
   }
   exit(1);
@@ -316,7 +330,7 @@ void *sensor(void *param){
     Sensor s = *((Sensor *)param);
     int x = 0;
     // shmget returns an identifier in shmid 
-    int shmid = shmget(s.id+s.comm, sizeof(int)*s.buffer ,0666); 
+    int shmid = shmget(s.id+s.comm, sizeof(int)*s.buffer ,0666|IPC_CREAT); 
     
     // shmat to attach to shared memory 
     int *valores = (int*) shmat(shmid,NULL,0);
@@ -362,7 +376,7 @@ void *decision(void *param){
 }
 
 void *varianza(void *param){
-    Sensor *competitivo = ((Sensor *)param);
+    Lista *competitivo = ((Lista *)param);
     Lista tipo1,tipo2,tipo3,tipo4;
     tipo1.cabecera=NULL;    
     tipo2.cabecera=NULL;
@@ -370,9 +384,10 @@ void *varianza(void *param){
     tipo4.cabecera=NULL;
     
     Sensor s;
-
-    for(int x=0;x<cntComp;x++){
-        s=competitivo[x];
+    node *ptr;
+    ptr = competitivo->cabecera;
+    while(ptr != NULL) {
+        s=ptr->s;
         switch (s.tipo){
             case 1:
                 addNode(&tipo1,&s);
@@ -387,6 +402,7 @@ void *varianza(void *param){
                 addNode(&tipo4,&s);
                 break;
         }
+        ptr = ptr->siguiente;
     }
     float varianza=-1;
     float varianzaTmp=0;
@@ -454,21 +470,26 @@ float getVarianza(node *cabecera){
 }
 
 void *suma_ponderada(void *param){
-    Sensor *cooperativo = ((Sensor *)param);
+    Lista *lcooperativo = ((Lista *)param);
     int sumatoria=0;
     int nActivos=0;
+    node *ptr;
+    Sensor s;
+    ptr=lcooperativo->cabecera;
     while(1){
         usleep(deltaT);
         sumatoria=0;
         nActivos=0;
-        for(int x=0;x<cntCoop;x++){
-            if(*cooperativo[x].valorAct!=-1){
+        while(ptr != NULL) {
+            s=ptr->s;
+            if(*s.valorAct!=-1){
                 nActivos++;
-                //printf("\n VALOR %d y th %d\n",*cooperativo[x].valorAct, cooperativo[x].id);
-                if(*cooperativo[x].valorAct>cooperativo[x].th){
+                //printf("\n VALOR %d y th %d\n",*s.valorAct, s.id);
+                if(*s.valorAct>s.th){
                     sumatoria=sumatoria+1;
                 }      
             }
+            ptr = ptr->siguiente;
         }
         if (nActivos==0){
             SCoop=0;

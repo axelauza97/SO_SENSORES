@@ -1,14 +1,10 @@
 #include "csapp.h"
+#include <string.h>
 #include<sys/types.h>
 #include<sys/stat.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
 enum estados{EXIT=0,DESCONECTADO,CONECTADO,REC_RESP} estado; 
-int entrada();
+void entrada(int *opcion);
 int main(){
 
     int clientfd;
@@ -17,10 +13,11 @@ int main(){
 	char *host, buf[MAXLINE];
 	char ok[3];
 	rio_t rio;
+    int *opcion;
+    char opcionStr[2];
 
     host = "127.0.0.1";
 	port = "8080";
-
 	estado=DESCONECTADO;
 
     while(estado){
@@ -33,12 +30,14 @@ int main(){
 			break;
 
 		case(CONECTADO):
-            int opcion = entrada();
-            if (opcion==4){
+            opcion=malloc(sizeof(int)*1);
+            entrada(opcion);
+            if (*opcion==4){
                 estado=EXIT;
                 continue;
             }
-			Rio_writen(clientfd, opcion, 1);
+            sprintf(opcionStr,"%d",*opcion);
+			Rio_writen(clientfd, opcionStr, 2);
 			Rio_readn(clientfd,ok,2);
 			ok[3]='\0';	
 			if(strcmp(ok,"ok")==0) {
@@ -48,40 +47,49 @@ int main(){
 			}
 			break;
 
-		case(REC_RESP):			
-			while( (n=Rio_readn(clientfd,buf,MAXLINE)) >0)	{	
-                printf("%s",buf);
-	        }
-            estado=CONECTADO;
-            break;
-	}
-
-}
-int entrada(){
-    int opcion = 0;
-    printf("Opciones:\n\t1.- Datos que llegan en cada sensor\n");
-    printf("\t2.- Reglas que se cumplen y estado de alarma\n");
-    printf("\t3.- Ver informacion de diagnostico de sensores (activo/inactivo, pid, fecha de ultimo dato recibido)\n");
-    printf("\t4.- Salir\n");
-    while(1){
-        switch (opcion){
-            case 1:
-                printf("Datos que llegan en cada sensor\n");
-                break;
-            case 2:
-                printf("Reglas que se cumplen y estado de alarma\n");
-                break;
-            case 3:
-                printf("Ver informacion de diagnostico de sensores (activo/inactivo, pid, fecha de ultimo dato recibido)\n");
-                break;
-            default:
-                printf("Opciones:\n\t1.- Datos que llegan en cada sensor\n");
-                printf("\t2.- Reglas que se cumplen y estado de alarma\n");
-                printf("\t3.- Ver informacion de diagnostico de sensores (activo/inactivo, pid, fecha de ultimo dato recibido)\n");
-                printf("\t4.- Salir\n");
-                continue;
-                break;
+		case(REC_RESP):
+            while( (n=Rio_readn(clientfd,buf,MAXLINE)) >0)
+            {   if(buf[0]!='o')     
+                printf("\n--> %s",buf);
+                Rio_writen(clientfd, "ok", 2*sizeof(char));
             }
+            estado=DESCONECTADO;
+            break;
+        case(EXIT):
+            exit(0);
+            break;
+	    }
+
     }
-    return opcion;
+    exit(0);
+}
+
+
+void entrada(int *opcion){
+    int flag=1;
+    while(flag){
+        printf("Opciones:\n\t1.- Datos que llegan en cada sensor\n");
+        printf("\t2.- Reglas que se cumplen y estado de alarma\n");
+        printf("\t3.- Ver informacion de diagnostico de sensores (activo/inactivo, pid, fecha de ultimo dato recibido)\n");
+        printf("\t4.- Salir\n");
+        scanf("%d",opcion);
+        switch (*opcion){
+        case 1:
+            printf("Datos que llegan en cada sensor\n");
+            flag=0;
+            break;
+        case 2:
+            printf("Reglas que se cumplen y estado de alarma\n");
+            flag=0;
+            break;
+        case 3:
+            printf("Ver informacion de diagnostico de sensores (activo/inactivo, pid, fecha de ultimo dato recibido)\n");
+            flag=0;
+            break;      
+        case 4:
+            printf("Salir");
+            flag=0;
+            break;
+        }
+    }
 }
